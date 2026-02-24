@@ -107,7 +107,7 @@ async def start_make_order(callback: CallbackQuery, state: FSMContext) -> None:
 # ── Step 1: Photo ───────────────────────────────────────
 
 
-@router.message(FoundItemForm.photo)
+@router.message(FoundItemForm.photo, lambda message: not (message.text and message.text.startswith("/")))
 async def receive_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     if not message.photo:
         await message.answer("Please send a valid photo.")
@@ -186,7 +186,7 @@ async def handle_edit(callback: CallbackQuery, state: FSMContext, bot: Bot) -> N
     await callback.answer()
 
 
-@router.message(EditingForm.photo)
+@router.message(EditingForm.photo, lambda message: not (message.text and message.text.startswith("/")))
 async def update_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     if not message.photo:
         await message.answer("Please send a valid photo.")
@@ -212,7 +212,7 @@ async def update_category(callback: CallbackQuery, state: FSMContext, bot: Bot) 
     await callback.answer()
 
 
-@router.message(EditingForm.location)
+@router.message(EditingForm.location, lambda message: not (message.text and message.text.startswith("/")))
 async def update_location(message: Message, state: FSMContext, bot: Bot) -> None:
     if message.text and message.text.strip() != "-":
         await state.update_data(location=message.text)
@@ -222,7 +222,7 @@ async def update_location(message: Message, state: FSMContext, bot: Bot) -> None
     await _show_summary(message, data, state, bot)
 
 
-@router.message(EditingForm.comments)
+@router.message(EditingForm.comments, lambda message: not (message.text and message.text.startswith("/")))
 async def update_comments(message: Message, state: FSMContext, bot: Bot) -> None:
     if message.text and message.text.strip() != "-":
         await state.update_data(comments=message.text)
