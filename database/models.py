@@ -48,4 +48,15 @@ async def init_db() -> None:
             """
         )
 
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lost_items (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                category   TEXT     NOT NULL,
+                message_id TEXT     NOT NULL,
+                date       DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
     logger.info("Database tables initialised")
