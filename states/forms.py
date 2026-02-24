@@ -29,6 +29,24 @@ class FilterForm(StatesGroup):
     days = State()
 
 
+class LostItemForm(StatesGroup):
+    """Multi-step form for reporting a lost item."""
+    photo = State()
+    category = State()
+    location = State()
+    contact = State()
+    comments = State()
+
+
+class LostEditingForm(StatesGroup):
+    """Editing individual fields of a lost-item report."""
+    photo = State()
+    category = State()
+    location = State()
+    contact = State()
+    comments = State()
+
+
 class SearchState(StatesGroup):
     """Active viewing state after search results are shown."""
     viewing = State()
