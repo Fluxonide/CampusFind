@@ -218,7 +218,7 @@ async def cmd_sendall(message: Message, state: FSMContext) -> None:
     await state.set_state(AdminForm.broadcast)
 
 
-@router.message(AdminForm.broadcast)
+@router.message(AdminForm.broadcast, lambda message: not (message.text and message.text.startswith("/")))
 async def process_broadcast(message: Message, state: FSMContext, bot: Bot) -> None:
     users = await db.get_all_user_ids()
     success = 0
