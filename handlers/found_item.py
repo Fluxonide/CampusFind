@@ -29,6 +29,7 @@ from database import services as db
 from keyboards.inline import (
     CATEGORIES,
     category_select_keyboard,
+    channel_found_keyboard,
     confirm_edit_keyboard,
     notification_delete_keyboard,
 )
@@ -257,6 +258,13 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
             chat_id=settings.channel_username,
             photo=data["photo"],
             caption=summary_for_channel,
+        )
+
+        # Add the "Mark as Found" button (needs message_id from sent_msg)
+        await bot.edit_message_reply_markup(
+            chat_id=settings.channel_username,
+            message_id=sent_msg.message_id,
+            reply_markup=channel_found_keyboard(sent_msg.message_id),
         )
 
         # Save to DB
