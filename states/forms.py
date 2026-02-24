@@ -10,6 +10,7 @@ class FoundItemForm(StatesGroup):
     photo = State()
     category = State()
     location = State()
+    contact = State()
     comments = State()
 
 
@@ -18,6 +19,7 @@ class EditingForm(StatesGroup):
     photo = State()
     category = State()
     location = State()
+    contact = State()
     comments = State()
 
 
