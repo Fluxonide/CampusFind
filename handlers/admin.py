@@ -137,6 +137,59 @@ async def handle_admin_delete(callback: CallbackQuery, bot: Bot) -> None:
         logger.error("Admin deletion error: %s", exc)
 
 
+# ── Admin Mark as Found ─────────────────────────────────
+
+
+@router.callback_query(IsAdmin(), lambda c: c.data is not None and c.data.startswith("admin_found_"))
+async def handle_admin_found(callback: CallbackQuery, bot: Bot) -> None:
+    msg_id = callback.data.split("_")[2]  # type: ignore[union-attr]
+
+    try:
+        # Fetch the channel message to get current caption
+        try:
+            chat_msg = await bot.forward_message(
+                chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+                from_chat_id=settings.channel_username,
+                message_id=int(msg_id),
+            )
+            old_caption = chat_msg.caption or ""
+            # Delete the forwarded copy
+            await _delete_msg(bot, callback.message.chat.id, chat_msg.message_id)  # type: ignore[union-attr]
+        except Exception:
+            old_caption = ""
+
+        # Edit the channel message caption with a "CLAIMED" banner
+        new_caption = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_caption}"
+        try:
+            await bot.edit_message_caption(
+                chat_id=settings.channel_username,
+                message_id=int(msg_id),
+                caption=new_caption,
+            )
+        except TelegramBadRequest as exc:
+            logger.warning("Could not edit channel message %s: %s", msg_id, exc)
+
+        # Remove from database
+        await db.delete_item(msg_id)
+
+        # Remove the admin card from chat
+        await _delete_msg(
+            bot,
+            callback.message.chat.id,  # type: ignore[union-attr]
+            callback.message.message_id,  # type: ignore[union-attr]
+        )
+
+        success_msg = await callback.message.answer(  # type: ignore[union-attr]
+            f"✅ Message {msg_id} marked as found & updated in channel"
+        )
+        asyncio.create_task(
+            _delete_after_delay(bot, success_msg.chat.id, success_msg.message_id)
+        )
+    except Exception as exc:
+        await callback.answer(f"❌ Error: {exc}")
+        logger.error("Admin mark-found error: %s", exc)
+
+
 # ── Admin Cleanup ───────────────────────────────────────
 
 
