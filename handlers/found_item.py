@@ -67,6 +67,7 @@ async def _show_summary(message: Message, data: dict, state: FSMContext, bot: Bo
         f"📄 <b>Review Your Form:</b>\n"
         f"<b>Category:</b> {data.get('category', '-')}\n"
         f"<b>Location:</b> {data.get('location', '-')}\n"
+        f"<b>Contact:</b> {data.get('contact', '-')}\n"
         f"<b>Comments:</b> {data.get('comments', '-')}"
     )
 
@@ -174,6 +175,12 @@ async def handle_edit(callback: CallbackQuery, state: FSMContext, bot: Bot) -> N
         )
         await state.update_data(last_bot_message=msg.message_id)
         await state.set_state(EditingForm.location)
+    elif action == "contact":
+        msg = await callback.message.answer(  # type: ignore[union-attr]
+            'Enter your contact number: (Type "-" to skip)'
+        )
+        await state.update_data(last_bot_message=msg.message_id)
+        await state.set_state(EditingForm.contact)
     elif action == "comments":
         msg = await callback.message.answer(  # type: ignore[union-attr]
             'Add or edit your comments: (Type "-" to skip)'
@@ -223,6 +230,16 @@ async def update_location(message: Message, state: FSMContext, bot: Bot) -> None
     await _show_summary(message, data, state, bot)
 
 
+@router.message(EditingForm.contact, lambda message: not (message.text and message.text.startswith("/")))
+async def update_contact(message: Message, state: FSMContext, bot: Bot) -> None:
+    if message.text and message.text.strip() != "-":
+        await state.update_data(contact=message.text)
+    data = await state.get_data()
+    await _delete_msg(bot, message.chat.id, data.get("last_bot_message"))
+    await _delete_msg(bot, message.chat.id, message.message_id)
+    await _show_summary(message, data, state, bot)
+
+
 @router.message(EditingForm.comments, lambda message: not (message.text and message.text.startswith("/")))
 async def update_comments(message: Message, state: FSMContext, bot: Bot) -> None:
     if message.text and message.text.strip() != "-":
@@ -247,7 +264,9 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
     )
 
     summary_for_channel = (
+        f"📦 Found Item\n\n"
         f"Location: {data.get('location', '-')}\n"
+        f"Contact: {data.get('contact', '-')}\n"
         f"Comments: {data.get('comments', '-')}\n"
         f"Date: {datetime.now().date()}"
     )
