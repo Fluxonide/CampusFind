@@ -89,6 +89,17 @@ async def get_category_count(category: str) -> int:
         return row[0] if row else 0
 
 
+async def get_item_category(message_id: str) -> str | None:
+    """Return the category of a found item by its message_id, or None."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT category FROM found_items WHERE message_id = ?",
+            (message_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
 async def delete_item(message_id: str) -> None:
     """Delete a found-item record by its message_id."""
     async with get_db() as db:
