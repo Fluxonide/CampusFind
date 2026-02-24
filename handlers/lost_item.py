@@ -80,7 +80,7 @@ async def handle_filter_category(callback: CallbackQuery, state: FSMContext, bot
 # ── Step 2: Days ────────────────────────────────────────
 
 
-@router.message(FilterForm.days)
+@router.message(FilterForm.days, lambda message: not (message.text and message.text.startswith("/")))
 async def handle_filter_days(message: Message, state: FSMContext, bot: Bot) -> None:
     days_text = (message.text or "").strip()
     data = await state.get_data()
