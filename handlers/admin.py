@@ -190,6 +190,42 @@ async def handle_admin_found(callback: CallbackQuery, bot: Bot) -> None:
         logger.error("Admin mark-found error: %s", exc)
 
 
+# ── Channel "Mark as Found" Button ──────────────────────
+
+
+@router.callback_query(lambda c: c.data is not None and c.data.startswith("ch_found_"))
+async def handle_channel_found(callback: CallbackQuery, bot: Bot) -> None:
+    # Only admins can use this button
+    if callback.from_user.id not in settings.admin_ids:
+        await callback.answer("⛔ Only admins can mark items as found.", show_alert=True)
+        return
+
+    msg_id = callback.data.split("_")[2]  # type: ignore[union-attr]
+
+    try:
+        # Get the current caption
+        old_caption = ""
+        if callback.message and hasattr(callback.message, "caption"):
+            old_caption = callback.message.caption or ""  # type: ignore[union-attr]
+
+        # Edit caption with "CLAIMED" banner and remove the button
+        new_caption = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_caption}"
+        await bot.edit_message_caption(
+            chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+            message_id=int(msg_id),
+            caption=new_caption,
+            reply_markup=None,  # Remove the button
+        )
+
+        # Remove from database
+        await db.delete_item(msg_id)
+
+        await callback.answer("✅ Marked as found!")
+    except Exception as exc:
+        await callback.answer(f"❌ Error: {exc}", show_alert=True)
+        logger.error("Channel mark-found error: %s", exc)
+
+
 # ── Admin Cleanup ───────────────────────────────────────
 
 
