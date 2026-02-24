@@ -21,6 +21,8 @@ from keyboards.inline import (
     CATEGORIES,
     admin_cleanup_keyboard,
     admin_delete_keyboard,
+    channel_found_keyboard,
+    channel_undo_keyboard,
 )
 from states.forms import AdminForm
 from utils.filters import IsAdmin
@@ -190,40 +192,84 @@ async def handle_admin_found(callback: CallbackQuery, bot: Bot) -> None:
         logger.error("Admin mark-found error: %s", exc)
 
 
-# ── Channel "Mark as Found" Button ──────────────────────
+# ── Channel "Mark as Claimed" Button ─────────────────────
 
 
 @router.callback_query(lambda c: c.data is not None and c.data.startswith("ch_found_"))
 async def handle_channel_found(callback: CallbackQuery, bot: Bot) -> None:
     # Only admins can use this button
     if callback.from_user.id not in settings.admin_ids:
-        await callback.answer("⛔ Only admins can mark items as found.", show_alert=True)
+        await callback.answer("⛔ Only admins can mark items as claimed.", show_alert=True)
         return
 
     msg_id = callback.data.split("_")[2]  # type: ignore[union-attr]
 
     try:
+        # Get category before deleting (for undo)
+        category = await db.get_item_category(msg_id) or "other"
+
         # Get the current caption
         old_caption = ""
         if callback.message and hasattr(callback.message, "caption"):
             old_caption = callback.message.caption or ""  # type: ignore[union-attr]
 
-        # Edit caption with "CLAIMED" banner and remove the button
+        # Edit caption with "CLAIMED" banner and show undo button
         new_caption = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_caption}"
         await bot.edit_message_caption(
             chat_id=callback.message.chat.id,  # type: ignore[union-attr]
             message_id=int(msg_id),
             caption=new_caption,
-            reply_markup=None,  # Remove the button
+            reply_markup=channel_undo_keyboard(int(msg_id), category),
         )
 
         # Remove from database
         await db.delete_item(msg_id)
 
-        await callback.answer("✅ Marked as found!")
+        await callback.answer("✅ Marked as claimed!")
     except Exception as exc:
         await callback.answer(f"❌ Error: {exc}", show_alert=True)
-        logger.error("Channel mark-found error: %s", exc)
+        logger.error("Channel mark-claimed error: %s", exc)
+
+
+# ── Channel Undo Button ─────────────────────────────────
+
+
+@router.callback_query(lambda c: c.data is not None and c.data.startswith("ch_undo_"))
+async def handle_channel_undo(callback: CallbackQuery, bot: Bot) -> None:
+    # Only admins can undo
+    if callback.from_user.id not in settings.admin_ids:
+        await callback.answer("⛔ Only admins can undo.", show_alert=True)
+        return
+
+    parts = callback.data.split("_")  # type: ignore[union-attr]
+    # ch_undo_<msg_id>_<category>
+    msg_id = parts[2]
+    category = parts[3] if len(parts) > 3 else "other"
+
+    try:
+        # Get current caption and strip the CLAIMED banner
+        old_caption = ""
+        if callback.message and hasattr(callback.message, "caption"):
+            old_caption = callback.message.caption or ""  # type: ignore[union-attr]
+
+        # Remove the "CLAIMED" banner
+        restored_caption = old_caption.replace("✅ ITEM HAS BEEN CLAIMED ✅\n\n", "")
+
+        # Restore original caption with "Mark as Claimed" button
+        await bot.edit_message_caption(
+            chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+            message_id=int(msg_id),
+            caption=restored_caption,
+            reply_markup=channel_found_keyboard(int(msg_id)),
+        )
+
+        # Re-add to database
+        await db.add_found_item(category, int(msg_id))
+
+        await callback.answer("↩️ Undo successful — item restored!")
+    except Exception as exc:
+        await callback.answer(f"❌ Error: {exc}", show_alert=True)
+        logger.error("Channel undo error: %s", exc)
 
 
 # ── Admin Cleanup ───────────────────────────────────────
