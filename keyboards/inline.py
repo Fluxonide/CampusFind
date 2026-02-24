@@ -191,7 +191,11 @@ def admin_delete_keyboard(message_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="🗑️ Delete from DB",
                     callback_data=f"admin_delete_{message_id}",
-                )
+                ),
+                InlineKeyboardButton(
+                    text="✅ Item Found",
+                    callback_data=f"admin_found_{message_id}",
+                ),
             ]
         ]
     )
