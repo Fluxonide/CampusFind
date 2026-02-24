@@ -1,0 +1,214 @@
+"""
+Admin handlers: /showall, /sendall, deletion, and cleanup.
+
+All handlers are guarded by the IsAdmin filter.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from aiogram import Bot, Router
+from aiogram.types import CallbackQuery, Message
+from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+
+from core.config import settings
+from core.logger import get_logger
+from database import services as db
+from keyboards.inline import (
+    CATEGORIES,
+    admin_cleanup_keyboard,
+    admin_delete_keyboard,
+)
+from states.forms import AdminForm
+from utils.filters import IsAdmin
+
+logger = get_logger(__name__)
+
+router = Router(name="admin")
+
+ADMIN_EMOJI = "👮‍♂️"
+
+
+# ── Helpers ─────────────────────────────────────────────
+
+
+async def _delete_msg(bot: Bot, chat_id: int, msg_id: int | None) -> None:
+    if msg_id is None:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except Exception:
+        pass
+
+
+async def _delete_after_delay(bot: Bot, chat_id: int, message_id: int, delay: int = 5) -> None:
+    await asyncio.sleep(delay)
+    await _delete_msg(bot, chat_id, message_id)
+
+
+# ── /showall ────────────────────────────────────────────
+
+
+@router.message(IsAdmin(), lambda message: message.text == "/showall")
+async def cmd_showall(message: Message, state: FSMContext, bot: Bot) -> None:
+    items = await db.get_all_items()
+
+    if not items:
+        await message.answer("No items found in database.")
+        return
+
+    sent_messages: list[int] = []
+    for item in items:
+        msg_id = item["message_id"]
+        category = item["category"]
+        date = item["date"]
+
+        try:
+            temp_msg = await bot.forward_message(
+                chat_id=message.chat.id,
+                from_chat_id=settings.channel_username,
+                message_id=int(msg_id),
+            )
+
+            # Extract location / comments from caption
+            caption = temp_msg.caption or ""
+            location = "-"
+            comments = "-"
+            for line in caption.split("\n"):
+                if line.startswith("Location:"):
+                    location = line.replace("Location:", "").strip()
+                elif line.startswith("Comments:"):
+                    comments = line.replace("Comments:", "").strip()
+
+            sent_msg = await message.answer_photo(
+                photo=temp_msg.photo[-1].file_id if temp_msg.photo else None,
+                caption=(
+                    f"Category: {CATEGORIES.get(category, category)}\n"
+                    f"Location: {location}\n"
+                    f"Comments: {comments}\n"
+                    f"Date: {date}"
+                ),
+                reply_markup=admin_delete_keyboard(msg_id),
+            )
+            sent_messages.append(sent_msg.message_id)
+
+            await bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=temp_msg.message_id,
+            )
+
+        except Exception as exc:
+            logger.error("Error showing message %s: %s", msg_id, exc)
+
+    end_list = await message.answer("End of list", reply_markup=admin_cleanup_keyboard())
+    await state.update_data(
+        sent_messages=sent_messages,
+        end_list_message=end_list.message_id,
+    )
+
+
+# ── Admin Delete ────────────────────────────────────────
+
+
+@router.callback_query(IsAdmin(), lambda c: c.data is not None and c.data.startswith("admin_delete_"))
+async def handle_admin_delete(callback: CallbackQuery, bot: Bot) -> None:
+    msg_id = callback.data.split("_")[2]  # type: ignore[union-attr]
+
+    try:
+        await db.delete_item(msg_id)
+
+        await _delete_msg(
+            bot,
+            callback.message.chat.id,  # type: ignore[union-attr]
+            callback.message.message_id,  # type: ignore[union-attr]
+        )
+
+        success_msg = await callback.message.answer(  # type: ignore[union-attr]
+            f"🗑️ Message {msg_id} deleted from database"
+        )
+        asyncio.create_task(
+            _delete_after_delay(bot, success_msg.chat.id, success_msg.message_id)
+        )
+    except Exception as exc:
+        await callback.answer(f"❌ Error: {exc}")
+        logger.error("Admin deletion error: %s", exc)
+
+
+# ── Admin Cleanup ───────────────────────────────────────
+
+
+@router.callback_query(IsAdmin(), lambda c: c.data == "admin_cleanup")
+async def handle_admin_cleanup(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    data = await state.get_data()
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+
+    for msg_id in data.get("sent_messages", []):
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except TelegramBadRequest as exc:
+            if "message to delete not found" not in str(exc):
+                logger.warning("Failed to delete message %s: %s", msg_id, exc)
+
+    await _delete_msg(bot, chat_id, data.get("end_list_message"))
+    await callback.answer("Cleanup completed")
+
+
+# ── /sendall ────────────────────────────────────────────
+
+
+@router.message(IsAdmin(), lambda message: message.text == "/sendall")
+async def cmd_sendall(message: Message, state: FSMContext) -> None:
+    await message.answer("Send the message you want to broadcast to all users:")
+    await state.set_state(AdminForm.broadcast)
+
+
+@router.message(AdminForm.broadcast)
+async def process_broadcast(message: Message, state: FSMContext, bot: Bot) -> None:
+    users = await db.get_all_user_ids()
+    success = 0
+    failed = 0
+
+    admin_badge = f"{ADMIN_EMOJI} *Broadcast from administrator:*\n\n"
+
+    if message.text:
+        full_text = admin_badge + message.text
+        for user_id in users:
+            try:
+                await bot.send_message(
+                    chat_id=user_id, text=full_text, parse_mode=ParseMode.MARKDOWN
+                )
+                success += 1
+            except Exception:
+                failed += 1
+
+    elif message.photo:
+        photo_file_id = message.photo[-1].file_id
+        caption = message.caption or ""
+        full_caption = admin_badge + caption
+        for user_id in users:
+            try:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_file_id,
+                    caption=full_caption,
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                success += 1
+            except Exception:
+                failed += 1
+
+    else:
+        await message.answer("Unsupported message type for broadcast.")
+        await state.clear()
+        return
+
+    stats = (
+        f"{ADMIN_EMOJI} Broadcast completed:\n"
+        f"✅ Delivered: {success}\n"
+        f"❌ Failed: {failed}"
+    )
+    await message.answer(stats)
+    await state.clear()
