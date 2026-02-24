@@ -81,8 +81,18 @@ def category_select_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def lost_action_keyboard() -> InlineKeyboardMarkup:
+    """Two options when user types /lost: search or report."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔍 Search Found Items", callback_data="lost_search")],
+            [InlineKeyboardButton(text="📝 Report Lost Item", callback_data="lost_report")],
+        ]
+    )
+
+
 def category_filter_keyboard() -> InlineKeyboardMarkup:
-    """Grid of category buttons for /lost — sends FILTER_CATEGORY:<key> as callback."""
+    """Grid of category buttons for /lost search — sends FILTER_CATEGORY:<key> as callback."""
     buttons: list[list[InlineKeyboardButton]] = []
     items = list(CATEGORIES.items())
     for i in range(0, len(items), 2):
@@ -97,6 +107,59 @@ def category_filter_keyboard() -> InlineKeyboardMarkup:
             ]
         )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def lost_category_select_keyboard() -> InlineKeyboardMarkup:
+    """Grid of category buttons for lost item report — sends LOST_CATEGORY:<key> as callback."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    items = list(CATEGORIES.items())
+    for i in range(0, len(items), 2):
+        row = items[i : i + 2]
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=title,
+                    callback_data=f"LOST_CATEGORY:{key}",
+                )
+                for key, title in row
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def lost_confirm_edit_keyboard(data: dict) -> InlineKeyboardMarkup:
+    """Summary / edit / confirm buttons for the lost item report form."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Confirm & Submit", callback_data="lost_confirm_submit")],
+            [
+                InlineKeyboardButton(
+                    text="📷 Edit Photo" if data.get("photo") else "📸 Add Photo",
+                    callback_data="lost_edit_photo",
+                ),
+                InlineKeyboardButton(
+                    text="🏷️ Edit Category" if data.get("category") else "🔍 Add Category",
+                    callback_data="lost_edit_category",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏠 Edit Location" if data.get("location") else "📍 Add Location",
+                    callback_data="lost_edit_location",
+                ),
+                InlineKeyboardButton(
+                    text="📞 Edit Contact" if data.get("contact") else "📞 Add Contact",
+                    callback_data="lost_edit_contact",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬 Edit Comment" if data.get("comments") else "📝 Add Comment",
+                    callback_data="lost_edit_comments",
+                ),
+            ],
+        ]
+    )
 
 
 def notify_subscribe_keyboard() -> InlineKeyboardMarkup:
