@@ -173,6 +173,12 @@ def confirm_edit_keyboard(data: dict) -> InlineKeyboardMarkup:
                     callback_data="edit_location",
                 ),
                 InlineKeyboardButton(
+                    text="📞 Edit Contact" if data.get("contact") else "📞 Add Contact",
+                    callback_data="edit_contact",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="💬 Edit Comment" if data.get("comments") else "📝 Add Comment",
                     callback_data="edit_comments",
                 ),
@@ -215,8 +221,22 @@ def channel_found_keyboard(message_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Mark as Found",
+                    text="✅ Mark as Claimed",
                     callback_data=f"ch_found_{message_id}",
+                )
+            ]
+        ]
+    )
+
+
+def channel_undo_keyboard(message_id: int, category: str) -> InlineKeyboardMarkup:
+    """Undo button shown after an item is marked as claimed."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="↩️ Undo",
+                    callback_data=f"ch_undo_{message_id}_{category}",
                 )
             ]
         ]
