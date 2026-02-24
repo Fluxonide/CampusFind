@@ -89,6 +89,18 @@ async def get_category_count(category: str) -> int:
         return row[0] if row else 0
 
 
+# ── Lost Items ──────────────────────────────────────────
+
+
+async def add_lost_item(category: str, message_id: int) -> None:
+    """Insert a new lost-item report record."""
+    async with get_db() as db:
+        await db.execute(
+            "INSERT INTO lost_items (category, message_id, date) VALUES (?, ?, ?)",
+            (category, str(message_id), datetime.now()),
+        )
+
+
 async def get_item_category(message_id: str) -> str | None:
     """Return the category of a found item by its message_id, or None."""
     async with get_db() as db:
