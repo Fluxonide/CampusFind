@@ -209,7 +209,18 @@ def admin_cleanup_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-# ── Search Results ──────────────────────────────────────
+def channel_found_keyboard(message_id: int) -> InlineKeyboardMarkup:
+    """Button shown on channel posts — only admins can use it."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Mark as Found",
+                    callback_data=f"ch_found_{message_id}",
+                )
+            ]
+        ]
+    )
 
 
 def hide_orders_keyboard() -> InlineKeyboardMarkup:
