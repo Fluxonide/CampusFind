@@ -30,6 +30,7 @@ from keyboards.inline import (
     lost_action_keyboard,
     lost_category_select_keyboard,
     lost_confirm_edit_keyboard,
+    lost_skip_photo_keyboard,
 )
 from states.forms import FilterForm, LostEditingForm, LostItemForm, SearchState
 
@@ -218,7 +219,10 @@ async def handle_lost_report(callback: CallbackQuery, state: FSMContext, bot: Bo
     chat_id = callback.message.chat.id  # type: ignore[union-attr]
     await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
 
-    msg = await callback.message.answer("📸 Please send a photo of the item you lost.")  # type: ignore[union-attr]
+    msg = await callback.message.answer(  # type: ignore[union-attr]
+        "📸 Please send a photo of the item you lost, or skip:",
+        reply_markup=lost_skip_photo_keyboard(),
+    )
     await state.update_data(last_bot_message=msg.message_id)
     await state.set_state(LostItemForm.photo)
     await callback.answer()
@@ -227,10 +231,26 @@ async def handle_lost_report(callback: CallbackQuery, state: FSMContext, bot: Bo
 # ── Report Step 1: Photo ────────────────────────────────
 
 
+@router.callback_query(LostItemForm.photo, lambda c: c.data == "lost_skip_photo")
+async def lost_skip_photo(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """User chose to skip the photo step."""
+    data = await state.get_data()
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+    await _delete_msg(bot, chat_id, data.get("last_bot_message"))
+    await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
+
+    msg = await callback.message.answer(  # type: ignore[union-attr]
+        "📂 Select a category:", reply_markup=lost_category_select_keyboard()
+    )
+    await state.update_data(last_bot_message=msg.message_id)
+    await state.set_state(LostItemForm.category)
+    await callback.answer()
+
+
 @router.message(LostItemForm.photo, lambda message: not (message.text and message.text.startswith("/")))
 async def lost_receive_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     if not message.photo:
-        await message.answer("Please send a valid photo.")
+        await message.answer("Please send a valid photo or tap ⏭ Skip Photo.")
         return
 
     await state.update_data(photo=message.photo[-1].file_id)
@@ -274,7 +294,10 @@ async def handle_lost_edit(callback: CallbackQuery, state: FSMContext, bot: Bot)
     chat_id = callback.message.chat.id  # type: ignore[union-attr]
 
     if action == "photo":
-        msg = await callback.message.answer("📸 Please send a new photo.")  # type: ignore[union-attr]
+        msg = await callback.message.answer(  # type: ignore[union-attr]
+            "📸 Please send a new photo, or skip:",
+            reply_markup=lost_skip_photo_keyboard(),
+        )
         await state.update_data(last_bot_message=msg.message_id)
         await state.set_state(LostEditingForm.photo)
     elif action == "category":
@@ -305,6 +328,18 @@ async def handle_lost_edit(callback: CallbackQuery, state: FSMContext, bot: Bot)
     data = await state.get_data()
     await _delete_msg(bot, chat_id, data.get("summary_message"))
     await _delete_msg(bot, chat_id, data.get("buttons_message"))
+    await callback.answer()
+
+
+@router.callback_query(LostEditingForm.photo, lambda c: c.data == "lost_skip_photo")
+async def lost_edit_skip_photo(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """User chose to remove/skip the photo during editing."""
+    await state.update_data(photo=None)
+    data = await state.get_data()
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+    await _delete_msg(bot, chat_id, data.get("last_bot_message"))
+    await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
+    await _show_lost_summary(callback.message, data, state, bot)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -384,11 +419,17 @@ async def lost_confirm_submission(callback: CallbackQuery, state: FSMContext, bo
     )
 
     try:
-        sent_msg = await bot.send_photo(
-            chat_id=settings.channel_username,
-            photo=data["photo"],
-            caption=summary_for_channel,
-        )
+        if data.get("photo"):
+            sent_msg = await bot.send_photo(
+                chat_id=settings.channel_username,
+                photo=data["photo"],
+                caption=summary_for_channel,
+            )
+        else:
+            sent_msg = await bot.send_message(
+                chat_id=settings.channel_username,
+                text=summary_for_channel,
+            )
 
         # Add "Mark as Claimed" button
         await bot.edit_message_reply_markup(
