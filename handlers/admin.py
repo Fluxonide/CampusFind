@@ -75,26 +75,34 @@ async def cmd_showall(message: Message, state: FSMContext, bot: Bot) -> None:
                 message_id=int(msg_id),
             )
 
-            # Extract location / comments from caption
-            caption = temp_msg.caption or ""
+            # Extract location / comments from caption or text
+            content = temp_msg.caption or temp_msg.text or ""
             location = "-"
             comments = "-"
-            for line in caption.split("\n"):
+            for line in content.split("\n"):
                 if line.startswith("Location:"):
                     location = line.replace("Location:", "").strip()
                 elif line.startswith("Comments:"):
                     comments = line.replace("Comments:", "").strip()
 
-            sent_msg = await message.answer_photo(
-                photo=temp_msg.photo[-1].file_id if temp_msg.photo else None,
-                caption=(
-                    f"Category: {CATEGORIES.get(category, category)}\n"
-                    f"Location: {location}\n"
-                    f"Comments: {comments}\n"
-                    f"Date: {date}"
-                ),
-                reply_markup=admin_delete_keyboard(msg_id),
+            info_text = (
+                f"Category: {CATEGORIES.get(category, category)}\n"
+                f"Location: {location}\n"
+                f"Comments: {comments}\n"
+                f"Date: {date}"
             )
+
+            if temp_msg.photo:
+                sent_msg = await message.answer_photo(
+                    photo=temp_msg.photo[-1].file_id,
+                    caption=info_text,
+                    reply_markup=admin_delete_keyboard(msg_id),
+                )
+            else:
+                sent_msg = await message.answer(
+                    info_text,
+                    reply_markup=admin_delete_keyboard(msg_id),
+                )
             sent_messages.append(sent_msg.message_id)
 
             await bot.delete_message(
@@ -147,27 +155,37 @@ async def handle_admin_found(callback: CallbackQuery, bot: Bot) -> None:
     msg_id = callback.data.split("_")[2]  # type: ignore[union-attr]
 
     try:
-        # Fetch the channel message to get current caption
+        # Fetch the channel message to get current content
+        is_photo = False
+        old_content = ""
         try:
             chat_msg = await bot.forward_message(
                 chat_id=callback.message.chat.id,  # type: ignore[union-attr]
                 from_chat_id=settings.channel_username,
                 message_id=int(msg_id),
             )
-            old_caption = chat_msg.caption or ""
+            is_photo = bool(chat_msg.photo)
+            old_content = chat_msg.caption or chat_msg.text or ""
             # Delete the forwarded copy
             await _delete_msg(bot, callback.message.chat.id, chat_msg.message_id)  # type: ignore[union-attr]
         except Exception:
-            old_caption = ""
+            old_content = ""
 
-        # Edit the channel message caption with a "CLAIMED" banner
-        new_caption = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_caption}"
+        # Edit the channel message with a "CLAIMED" banner
+        new_content = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_content}"
         try:
-            await bot.edit_message_caption(
-                chat_id=settings.channel_username,
-                message_id=int(msg_id),
-                caption=new_caption,
-            )
+            if is_photo:
+                await bot.edit_message_caption(
+                    chat_id=settings.channel_username,
+                    message_id=int(msg_id),
+                    caption=new_content,
+                )
+            else:
+                await bot.edit_message_text(
+                    chat_id=settings.channel_username,
+                    message_id=int(msg_id),
+                    text=new_content,
+                )
         except TelegramBadRequest as exc:
             logger.warning("Could not edit channel message %s: %s", msg_id, exc)
 
@@ -208,19 +226,31 @@ async def handle_channel_found(callback: CallbackQuery, bot: Bot) -> None:
         # Get category before deleting (for undo)
         category = await db.get_item_category(msg_id) or "other"
 
-        # Get the current caption
-        old_caption = ""
-        if callback.message and hasattr(callback.message, "caption"):
-            old_caption = callback.message.caption or ""  # type: ignore[union-attr]
+        # Detect if it's a photo or text message
+        is_photo = bool(callback.message and callback.message.photo)  # type: ignore[union-attr]
+        old_content = ""
+        if callback.message:
+            if is_photo:
+                old_content = callback.message.caption or ""  # type: ignore[union-attr]
+            else:
+                old_content = callback.message.text or ""  # type: ignore[union-attr]
 
-        # Edit caption with "CLAIMED" banner and show undo button
-        new_caption = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_caption}"
-        await bot.edit_message_caption(
-            chat_id=callback.message.chat.id,  # type: ignore[union-attr]
-            message_id=int(msg_id),
-            caption=new_caption,
-            reply_markup=channel_undo_keyboard(int(msg_id), category),
-        )
+        # Edit with "CLAIMED" banner and show undo button
+        new_content = f"✅ ITEM HAS BEEN CLAIMED ✅\n\n{old_content}"
+        if is_photo:
+            await bot.edit_message_caption(
+                chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+                message_id=int(msg_id),
+                caption=new_content,
+                reply_markup=channel_undo_keyboard(int(msg_id), category),
+            )
+        else:
+            await bot.edit_message_text(
+                chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+                message_id=int(msg_id),
+                text=new_content,
+                reply_markup=channel_undo_keyboard(int(msg_id), category),
+            )
 
         # Remove from database
         await db.delete_item(msg_id)
@@ -247,21 +277,33 @@ async def handle_channel_undo(callback: CallbackQuery, bot: Bot) -> None:
     category = parts[3] if len(parts) > 3 else "other"
 
     try:
-        # Get current caption and strip the CLAIMED banner
-        old_caption = ""
-        if callback.message and hasattr(callback.message, "caption"):
-            old_caption = callback.message.caption or ""  # type: ignore[union-attr]
+        # Detect if it's a photo or text message
+        is_photo = bool(callback.message and callback.message.photo)  # type: ignore[union-attr]
+        old_content = ""
+        if callback.message:
+            if is_photo:
+                old_content = callback.message.caption or ""  # type: ignore[union-attr]
+            else:
+                old_content = callback.message.text or ""  # type: ignore[union-attr]
 
         # Remove the "CLAIMED" banner
-        restored_caption = old_caption.replace("✅ ITEM HAS BEEN CLAIMED ✅\n\n", "")
+        restored_content = old_content.replace("✅ ITEM HAS BEEN CLAIMED ✅\n\n", "")
 
-        # Restore original caption with "Mark as Claimed" button
-        await bot.edit_message_caption(
-            chat_id=callback.message.chat.id,  # type: ignore[union-attr]
-            message_id=int(msg_id),
-            caption=restored_caption,
-            reply_markup=channel_found_keyboard(int(msg_id)),
-        )
+        # Restore original content with "Mark as Claimed" button
+        if is_photo:
+            await bot.edit_message_caption(
+                chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+                message_id=int(msg_id),
+                caption=restored_content,
+                reply_markup=channel_found_keyboard(int(msg_id)),
+            )
+        else:
+            await bot.edit_message_text(
+                chat_id=callback.message.chat.id,  # type: ignore[union-attr]
+                message_id=int(msg_id),
+                text=restored_content,
+                reply_markup=channel_found_keyboard(int(msg_id)),
+            )
 
         # Re-add to database
         await db.add_found_item(category, int(msg_id))
