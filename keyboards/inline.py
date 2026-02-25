@@ -60,6 +60,27 @@ def help_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+# ── Skip Photo ──────────────────────────────────────────
+
+
+def found_skip_photo_keyboard() -> InlineKeyboardMarkup:
+    """Skip button shown during /found photo step."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip Photo", callback_data="found_skip_photo")]
+        ]
+    )
+
+
+def lost_skip_photo_keyboard() -> InlineKeyboardMarkup:
+    """Skip button shown during /lost report photo step."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip Photo", callback_data="lost_skip_photo")]
+        ]
+    )
+
+
 # ── Category Search ─────────────────────────────────────
 
 
