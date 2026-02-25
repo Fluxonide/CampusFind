@@ -31,6 +31,7 @@ from keyboards.inline import (
     category_select_keyboard,
     channel_found_keyboard,
     confirm_edit_keyboard,
+    found_skip_photo_keyboard,
     notification_delete_keyboard,
 )
 from states.forms import EditingForm, FoundItemForm, FilterForm
@@ -95,24 +96,48 @@ async def _show_summary(message: Message, data: dict, state: FSMContext, bot: Bo
 async def cmd_found(message: Message, state: FSMContext) -> None:
     await state.clear()  # Reset any stuck FSM flow
     await state.set_state(FoundItemForm.photo)
-    msg = await message.answer("📸 Please send a photo of the item you found.")
+    msg = await message.answer(
+        "📸 Please send a photo of the item you found, or skip:",
+        reply_markup=found_skip_photo_keyboard(),
+    )
     await state.update_data(last_bot_message=msg.message_id)
 
 
 @router.callback_query(lambda c: c.data == "makeOrder")
-async def start_make_order(callback: CallbackQuery, state: FSMContext) -> None:
+async def start_make_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await state.set_state(FoundItemForm.photo)
-    await callback.message.edit_text("📸 Please send a photo of the item you found.")  # type: ignore[union-attr]
-    await state.update_data(last_bot_message=callback.message.message_id)  # type: ignore[union-attr]
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+    await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
+    msg = await callback.message.answer(  # type: ignore[union-attr]
+        "📸 Please send a photo of the item you found, or skip:",
+        reply_markup=found_skip_photo_keyboard(),
+    )
+    await state.update_data(last_bot_message=msg.message_id)
 
 
 # ── Step 1: Photo ───────────────────────────────────────
 
 
+@router.callback_query(FoundItemForm.photo, lambda c: c.data == "found_skip_photo")
+async def found_skip_photo(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """User chose to skip the photo step."""
+    data = await state.get_data()
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+    await _delete_msg(bot, chat_id, data.get("last_bot_message"))
+    await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
+
+    msg = await callback.message.answer(  # type: ignore[union-attr]
+        "📂 Select a category:", reply_markup=category_select_keyboard()
+    )
+    await state.update_data(last_bot_message=msg.message_id)
+    await state.set_state(FoundItemForm.category)
+    await callback.answer()
+
+
 @router.message(FoundItemForm.photo, lambda message: not (message.text and message.text.startswith("/")))
 async def receive_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     if not message.photo:
-        await message.answer("Please send a valid photo.")
+        await message.answer("Please send a valid photo or tap ⏭ Skip Photo.")
         return
 
     await state.update_data(photo=message.photo[-1].file_id)
@@ -160,7 +185,10 @@ async def handle_edit(callback: CallbackQuery, state: FSMContext, bot: Bot) -> N
     chat_id = callback.message.chat.id  # type: ignore[union-attr]
 
     if action == "photo":
-        msg = await callback.message.answer("📸 Please send a new photo.")  # type: ignore[union-attr]
+        msg = await callback.message.answer(  # type: ignore[union-attr]
+            "📸 Please send a new photo, or skip:",
+            reply_markup=found_skip_photo_keyboard(),
+        )
         await state.update_data(last_bot_message=msg.message_id)
         await state.set_state(EditingForm.photo)
     elif action == "category":
@@ -191,6 +219,18 @@ async def handle_edit(callback: CallbackQuery, state: FSMContext, bot: Bot) -> N
     data = await state.get_data()
     await _delete_msg(bot, chat_id, data.get("summary_message"))
     await _delete_msg(bot, chat_id, data.get("buttons_message"))
+    await callback.answer()
+
+
+@router.callback_query(EditingForm.photo, lambda c: c.data == "found_skip_photo")
+async def found_edit_skip_photo(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """User chose to remove/skip the photo during editing."""
+    await state.update_data(photo=None)
+    data = await state.get_data()
+    chat_id = callback.message.chat.id  # type: ignore[union-attr]
+    await _delete_msg(bot, chat_id, data.get("last_bot_message"))
+    await _delete_msg(bot, chat_id, callback.message.message_id)  # type: ignore[union-attr]
+    await _show_summary(callback.message, data, state, bot)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -273,11 +313,17 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
 
     try:
         # Post to the shared channel
-        sent_msg = await bot.send_photo(
-            chat_id=settings.channel_username,
-            photo=data["photo"],
-            caption=summary_for_channel,
-        )
+        if data.get("photo"):
+            sent_msg = await bot.send_photo(
+                chat_id=settings.channel_username,
+                photo=data["photo"],
+                caption=summary_for_channel,
+            )
+        else:
+            sent_msg = await bot.send_message(
+                chat_id=settings.channel_username,
+                text=summary_for_channel,
+            )
 
         # Add the "Mark as Found" button (needs message_id from sent_msg)
         await bot.edit_message_reply_markup(
@@ -293,14 +339,21 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
         subscribers = await db.get_subscribers(category_key)
         for user_id in subscribers:
             try:
-                notification_msg = await bot.send_photo(
-                    chat_id=user_id,
-                    photo=data["photo"],
-                    caption=(
-                        f"🔔 New item found in {data.get('category')}:\n\n"
-                        f"{summary_for_channel}"
-                    ),
+                notif_text = (
+                    f"🔔 New item found in {data.get('category')}:\n\n"
+                    f"{summary_for_channel}"
                 )
+                if data.get("photo"):
+                    notification_msg = await bot.send_photo(
+                        chat_id=user_id,
+                        photo=data["photo"],
+                        caption=notif_text,
+                    )
+                else:
+                    notification_msg = await bot.send_message(
+                        chat_id=user_id,
+                        text=notif_text,
+                    )
                 await bot.send_message(
                     chat_id=user_id,
                     text="Tap below to delete this notification",
